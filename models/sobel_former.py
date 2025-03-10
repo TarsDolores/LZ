@@ -1,14 +1,10 @@
-# -*- coding:utf-8 -*-
-# @Time : 2023/8/16 15:14
-# @Author : Lei Li
-# @Licence: Creative Commons (CC)
+
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
 import numpy as np
 
 class DropPath(nn.Module):
-    #防止过拟合
     def __init__(self, drop_prob=None):
         super().__init__()
         self.drop_prob = drop_prob
@@ -28,7 +24,7 @@ class DropPath(nn.Module):
         return self.drop_path(inputs)
 
 
-class Identity(nn.Module):#恒等映射
+class Identity(nn.Module):
     def __init__(self):
         super(Identity, self).__init__()
 
@@ -58,14 +54,13 @@ class PatchMerging(nn.Module):
         x = torch.cat([x0, x1, x2, x3], -1)
         x = x.reshape([b, -1, 4 * c])
 
-        x = self.norm(x)#标准化操作
+        x = self.norm(x)
         x = self.reduction(x)
 
         return x
 
 
 class Mlp(nn.Module):
-    #多层感知机（MLP）模块，用于对输入进行线性变换和非线性激活.
     def __init__(self, in_features, hidden_features, dropout):
         super(Mlp, self).__init__()
         self.fc1 = nn.Linear(in_features,
@@ -86,7 +81,6 @@ class Mlp(nn.Module):
 
 
 def windows_partition(x, window_size):
-    #将输入图像分割为窗口大小为 window_size x window_size 的小块
     B, H, W, C = x.shape
     x = x.reshape([B, H // window_size, window_size, W // window_size, window_size,C])
     x = x.permute(0, 1, 3, 2, 4, 5)
@@ -96,7 +90,6 @@ def windows_partition(x, window_size):
 
 
 def windows_reverse(windows, window_size, H, W):
-    #这个函数的目的是将分块后的小块图像重新组合成原始图像
     B = int(windows.shape[0] / (H * W / window_size / window_size))
     x = windows.reshape([B, H // window_size, W // window_size, window_size, window_size, -1])
     x = x.permute(0, 1, 3, 2, 4, 5)
@@ -219,7 +212,7 @@ class SwinTransformerBlock(nn.Module):
 
         self.norm1 = nn.LayerNorm(dim)
 
-        self.attn = WindowAttention(dim,#多头自注意力机制
+        self.attn = WindowAttention(dim,
                                     window_size=(self.window_size, self.window_size),
                                     num_heads=num_heads,
                                     qkv_bias=qkv_bias,
@@ -264,36 +257,33 @@ class SwinTransformerBlock(nn.Module):
 
         self.register_buffer("attn_mask", attn_mask)
 
-    def forward(self, x):
-        #Swin Transformer模型中的前向传播函数
+    def forward(self, x)
         H, W = self.input_resolution
         B, L, C = x.shape
         h = x
-        #H,W,B,L,C 高度 宽度 批量大小 长度 通道数 讲x赋给H
         new_shape = [B, H, W, C]
-        x = x.reshape(new_shape)#数据重塑
+        x = x.reshape(new_shape)
 
         if self.shift_size > 0:
             shifted_x = torch.roll(x,
                                    shifts=(-self.shift_size, -self.shift_size),
-                                   dims=(1, 2))#在高度和宽度维度上进行平移
+                                   dims=(1, 2))
         else:
             shifted_x = x
 
         x_windows = windows_partition(shifted_x, self.window_size)
         x_windows = x_windows.reshape([-1, self.window_size * self.window_size, C])
-        #将经过平移的数据塑造为具有窗口大小的小块
         attn_windows = self.attn(x_windows, mask=self.attn_mask)
         attn_windows = attn_windows.reshape([-1, self.window_size, self.window_size, C])
 
         shifted_x = windows_reverse(attn_windows, self.window_size, H, W)
-        #这段代码是将经过多头注意力计算的窗口化数据重新组合成原始图像的操作。
-        #这个操作通常在自注意力（Self-Attention）模型或卷积神经网络中用于还原图像。
+
+
         if self.shift_size > 0:
             x = torch.roll(shifted_x,
                            shifts=(self.shift_size, self.shift_size),
                            dims=(1, 2))
-                #将之前的 shifted_x 恢复到原始位置，因为在前面的操作中，数据被向左上方滚动了以进行处理。
+               
         else:
             x = shifted_x
 
@@ -309,7 +299,7 @@ class SwinTransformerBlock(nn.Module):
 
         x = self.mlp(x)
         x = self.norm2(x)
-        #实现了Transformer模型中的一个常见结构，即MLP (Multi-Layer Perceptron) 层的应用和Layer Normalization 的操作。
+     
         if self.drop_path is not None:
             x = h + self.drop_path(x)
         else:
@@ -402,31 +392,31 @@ class SwinTransformerResidualBlock(nn.Module):
         try:
             x1 = self.swinTs(x)
         except:
-            # 尺寸选择
+
             bs, c, h, w = x.shape
-            # 找最大值，再找距离最近尺寸
+
             m = max(h, w)
-            # 创建空列表
+
             result = []
             for i in range(14, m+1):
-                # 如果当前整数同时被2和7整除
+
                 if i % 2 == 0 and i % 7 == 0:
-                    # 将该整数加入结果列表中
+  
                     result.append(i)
             h1 = result[abs(np.array(result) - h).argmin()]
             w1 = result[abs(np.array(result) - w).argmin()]
-            # （上）下采样
-            x1 = F.interpolate(x, size=(h1, w1))  # 插值,mode选择默认
-            # 计算
+
+            x1 = F.interpolate(x, size=(h1, w1))
+
             x1 = self.swinTs(x1)
-            # （下）上采样
-            x1 = F.interpolate(x1, size=(h, w))  # 插值,mode选择默认
+
+            x1 = F.interpolate(x1, size=(h, w)) 
 
         return x1 +  self.shortcut(x)
 
 
 
-class Down(nn.Module):#下采样
+class Down(nn.Module):
     def __init__(self, input_dim, output_dim, input_resolution=None, ratio=2, layer='conv'):
         super().__init__()
         if input_resolution:
@@ -436,11 +426,11 @@ class Down(nn.Module):#下采样
 
         if layer == 'conv':
             self.down = nn.Sequential(
-                nn.Conv2d(output_dim, output_dim, kernel_size=(ratio + 1, ratio + 1), stride=(ratio, ratio), padding=(1, 1)),  # 卷积下采样
+                nn.Conv2d(output_dim, output_dim, kernel_size=(ratio + 1, ratio + 1), stride=(ratio, ratio), padding=(1, 1)), 
                 nn.LeakyReLU(inplace=True)
             )
         else:
-            self.down = nn.AvgPool2d(kernel_size=ratio, stride=ratio)  # 池化下采样
+            self.down = nn.AvgPool2d(kernel_size=ratio, stride=ratio) 
     def forward(self, x):
         x = self.res_block(x)
         x = self.down(x)
@@ -482,22 +472,22 @@ class ConvResidualBlock(nn.Module):
         return x
 
 
-# 上采样
-class Up(nn.Module):#上采样
+
+class Up(nn.Module):
     def __init__(self, input_dim, output_dim, input_resolution=None, ratio=2):
         super().__init__()
-        self.up = nn.Upsample(scale_factor=ratio, mode='nearest')  # 上采样
-        self.reduce = nn.Conv2d(input_dim, input_dim // 2, kernel_size=(1,1))  # 1x1卷积将通道数降低1/2
+        self.up = nn.Upsample(scale_factor=ratio, mode='nearest')
+        self.reduce = nn.Conv2d(input_dim, input_dim // 2, kernel_size=(1,1))
         self.ConvResidualBlock=ConvResidualBlock(input_dim, output_dim)
         if input_resolution:
             self.res_block = SwinTransformerResidualBlock(input_dim, output_dim, input_resolution)
         else:
             self.res_block = ResidualBlock(input_dim, output_dim)
 
-    def forward(self, x, r):  # r是跨层连接
+    def forward(self, x, r):
         x = self.up(x)
         x = self.reduce(x)
-        # 拼接
+
         try:
             x = torch.cat((x, r), dim=1)
         except:
@@ -512,13 +502,13 @@ class Up(nn.Module):#上采样
 class IdentityConv(nn.Module):
     def __init__(self, in_channels):
         super(IdentityConv, self).__init__()
-        # 1x1卷积核，保持输入输出的通道数相同
+
         self.conv = nn.Conv2d(in_channels, in_channels, kernel_size=1, stride=1, padding=0, bias=False)
 
-        # 初始化卷积核为单位矩阵，即所有权重为0，中心为1
+ 
         with torch.no_grad():
             self.conv.weight.fill_(0)
-            self.conv.weight[:, :, 0, 0] = 1  # 设置卷积核的中心位置为1
+            self.conv.weight[:, :, 0, 0] = 1 
 
     def forward(self, x):
         return self.conv(x)
@@ -546,9 +536,9 @@ class SpatialAttention(torch.nn.Module):
 
 
 
-# 自己写的, 可修改深度和通道数的Unet
-class my_Unet(nn.Module):#继承自nn,Module
-    def __init__(self, input_dim, output_dim, num_features, input_resolutions=None, sobel =True):  # 任意深度和通道数, 只要后一个是前一个的2倍就行
+
+class my_Unet(nn.Module):
+    def __init__(self, input_dim, output_dim, num_features, input_resolutions=None, sobel =True): 
         super().__init__()
         self.sobel = sobel
         self.num_class = output_dim
@@ -610,12 +600,11 @@ class my_Unet(nn.Module):#继承自nn,Module
         self.erb_trans_3 = ERB(1, 1)
 
     def forward(self, x):
-        # ----------sobel分支-------------
         x = self.conv_1(x)
-        e_outputs = []    # 记录encoder的输出
+        e_outputs = []    
         sobel_input = []
 
-        # 下采样
+
         for down in self.encoder_x:
             e_outputs.append(x)
             x = down(x)
@@ -623,7 +612,6 @@ class my_Unet(nn.Module):#继承自nn,Module
 
         c1, c2, c3, c4 = sobel_input
         f1, f2, f3, f4 = e_outputs
-        # TODO:自适应尺寸配不上，得补充代码
 
         if self.sobel:
             f1e = run_sobel(self.sobel_x1, self.sobel_y1, f1)#64
@@ -645,14 +633,12 @@ class my_Unet(nn.Module):#继承自nn,Module
         e_outputs[0] = f1e
         e_outputs[1] = f2e
         e_outputs[2] = f3e
-        # ----------Unet分支-------------
-        # 上采样
-        for up, r in zip(self.decoder_x, reversed(e_outputs)):  # encoder的输出要反过来
-            x = up(x, r)  # r是跨层连接
+        for up, r in zip(self.decoder_x, reversed(e_outputs)):  
+            x = up(x, r) 
 
         x = self.conv_out(x)
 
-        if x.shape[1] == 1:  # 一通道时加sigmoid
+        if x.shape[1] == 1:
             x = nn.LeakyReLU(inplace=True)(x)
         return x
 
@@ -718,7 +704,7 @@ class ERB(nn.Module):
 
 
 if __name__ == '__main__':
-    # 测试
+
     resolutions = [(252, 252), (126, 126), (56, 56), (28, 28)]
     model = my_Unet(3, 6, [32, 64, 128, 256, 512], input_resolutions=resolutions).cpu()
     x = torch.randn(1,3,256,256)
